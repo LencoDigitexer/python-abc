@@ -3,7 +3,7 @@ import os
 import tempfile
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, 
                              QPlainTextEdit, QTextEdit, QToolBar, QAction, QMessageBox,
-                             QSplitter, QPushButton)
+                             QSplitter, QPushButton, QFileDialog)
 from PyQt5.QtGui import QFont, QTextCursor, QColor, QTextCharFormat, QSyntaxHighlighter
 from PyQt5.QtCore import Qt, QProcess, QTimer, QRegExp
 
@@ -112,6 +112,7 @@ class CodeTab(QWidget):
         super().__init__()
         self.temp_dir = temp_dir
         self.process = None
+        self.file_path = None  # Путь к сохраненному файлу
         layout = QVBoxLayout()
         splitter = QSplitter(Qt.Vertical)
         
@@ -149,6 +150,9 @@ class MainWindow(QMainWindow):
         toolbar = QToolBar()
         self.addToolBar(toolbar)
         toolbar.addAction("New", self.new_tab)
+        toolbar.addAction("Open", self.open_file)
+        toolbar.addAction("Save", self.save_file)
+        toolbar.addAction("Save As", self.save_as_file)
         toolbar.addAction("Run", self.run_code)
         toolbar.addAction("Stop", self.stop_code)
         toolbar.addAction("Clear Console", self.clear_console)
@@ -157,6 +161,10 @@ class MainWindow(QMainWindow):
         menubar = self.menuBar()
         file_menu = menubar.addMenu("&File")
         file_menu.addAction("New", self.new_tab)
+        file_menu.addAction("Open", self.open_file)
+        file_menu.addAction("Save", self.save_file)
+        file_menu.addAction("Save As", self.save_as_file)
+        file_menu.addSeparator()
         file_menu.addAction("Exit", self.close)
         
         run_menu = menubar.addMenu("&Run")
@@ -167,6 +175,61 @@ class MainWindow(QMainWindow):
         tab = CodeTab(self.temp_dir)
         index = self.tabs.addTab(tab, "Untitled")
         self.tabs.setCurrentIndex(index)
+        return tab
+    
+    def current_tab(self):
+        return self.tabs.currentWidget()
+    
+    def save_file(self):
+        tab = self.current_tab()
+        if not tab:
+            return
+            
+        if tab.file_path:
+            try:
+                with open(tab.file_path, 'w') as f:
+                    f.write(tab.editor.toPlainText())
+                self.statusBar().showMessage(f"Saved {tab.file_path}")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Could not save file:\n{str(e)}")
+        else:
+            self.save_as_file()
+
+    def save_as_file(self):
+        tab = self.current_tab()
+        if not tab:
+            return
+            
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Python File",
+            "",
+            "Python Files (*.py);;All Files (*)"
+        )
+        
+        if file_path:
+            tab.file_path = file_path
+            self.save_file()
+            self.tabs.setTabText(self.tabs.currentIndex(), os.path.basename(file_path))
+
+    def open_file(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open Python File",
+            "",
+            "Python Files (*.py);;All Files (*)"
+        )
+        
+        if file_path:
+            try:
+                with open(file_path, 'r') as f:
+                    content = f.read()
+                tab = self.new_tab()
+                tab.editor.setPlainText(content)
+                tab.file_path = file_path
+                self.tabs.setTabText(self.tabs.currentIndex(), os.path.basename(file_path))
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Could not open file:\n{str(e)}")
 
     def close_tab(self, index):
         self.tabs.removeTab(index)
