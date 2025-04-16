@@ -3,9 +3,48 @@ import os
 import tempfile
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, 
                              QPlainTextEdit, QTextEdit, QToolBar, QAction, QMessageBox,
-                             QSplitter, QPushButton, QFileDialog)
-from PyQt5.QtGui import QFont, QTextCursor, QColor, QTextCharFormat, QSyntaxHighlighter
-from PyQt5.QtCore import Qt, QProcess, QTimer, QRegExp
+                             QSplitter, QPushButton, QFileDialog, QStatusBar, QLabel, QHBoxLayout)
+from PyQt5.QtGui import (QFont, QTextCursor, QColor, QTextCharFormat, QSyntaxHighlighter,
+                         QPainter, QTextFormat)
+from PyQt5.QtCore import Qt, QProcess, QTimer, QRegExp, QRect, QSize
+
+
+class LineNumberWidget(QWidget):
+    def __init__(self, editor):
+        super().__init__()
+        self.editor = editor
+        self.editor.blockCountChanged.connect(self.update_width)
+        self.editor.updateRequest.connect(self.update_area)
+        self.update_width()
+
+    def update_width(self):
+        width = self.fontMetrics().width(str(self.editor.blockCount())) + 10
+        self.setFixedWidth(width)
+        self.update()
+
+    def update_area(self, rect, dy):
+        if dy:
+            self.scroll(0, dy)
+        else:
+            self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.fillRect(event.rect(), Qt.lightGray)
+        block = self.editor.firstVisibleBlock()
+        block_number = block.blockNumber()
+        top = self.editor.blockBoundingGeometry(block).translated(self.editor.contentOffset()).top()
+        bottom = top + self.editor.blockBoundingRect(block).height()
+
+        while block.isValid() and top <= event.rect().bottom():
+            if block.isVisible() and bottom >= event.rect().top():
+                painter.drawText(0, round(top), 
+                                 self.width(), self.fontMetrics().height(),
+                                 Qt.AlignRight, str(block_number + 1))
+            block = block.next()
+            top = bottom
+            bottom = top + self.editor.blockBoundingRect(block).height()
+            block_number += 1
 
 class ConsoleWidget(QTextEdit):
     def __init__(self, parent=None):
@@ -112,22 +151,58 @@ class CodeTab(QWidget):
         super().__init__()
         self.temp_dir = temp_dir
         self.process = None
-        self.file_path = None  # Путь к сохраненному файлу
+        self.file_path = None
+        
         layout = QVBoxLayout()
         splitter = QSplitter(Qt.Vertical)
         
+        # Редактор кода
         self.editor = QPlainTextEdit()
         self.editor.setFont(QFont("Courier", 12))
+        
+        # Номера строк
+        self.line_number_widget = LineNumberWidget(self.editor)
+        
+        # Компоновка для редактора и номеров строк
+        hbox = QHBoxLayout()
+        hbox.setContentsMargins(0, 0, 0, 0)
+        hbox.addWidget(self.line_number_widget)
+        hbox.addWidget(self.editor)
+        editor_container = QWidget()
+        editor_container.setLayout(hbox)
+        
+        # Подсветка синтаксиса
         self.highlighter = PythonHighlighter(self.editor.document())
         
+        # Консоль
         self.console = ConsoleWidget()
         self.console.setFont(QFont("Courier", 12))
         
-        splitter.addWidget(self.editor)
+        # Статусная строка
+        self.status_label = QLabel("Ln 1, Col 1")
+        self.status_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        
+        # Сигналы для обновления статуса
+        self.editor.cursorPositionChanged.connect(self.update_status)
+        self.editor.textChanged.connect(self.update_line_numbers)
+        
+        splitter.addWidget(editor_container)
         splitter.addWidget(self.console)
         splitter.setSizes([600, 200])
+        
         layout.addWidget(splitter)
+        layout.addWidget(self.status_label)
         self.setLayout(layout)
+        
+    def update_line_numbers(self):
+        self.line_number_widget.update()
+        self.line_number_widget.update_width()
+
+    def update_status(self):
+        cursor = self.editor.textCursor()
+        line = cursor.blockNumber() + 1
+        col = cursor.columnNumber()
+        self.status_label.setText(f"Ln {line}, Col {col}")
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -145,6 +220,7 @@ class MainWindow(QMainWindow):
         self._create_menu()
         self.setWindowTitle("Python ABC IDE")
         self.setGeometry(100, 100, 1200, 800)
+        self.statusBar().showMessage("Ready") # Статусная строка
 
     def _create_toolbar(self):
         toolbar = QToolBar()
